@@ -1,0 +1,160 @@
+Multiple ways of creating Ansible dynamic inventory
+===========================================
+
+{
+  "all": {
+    "hosts": ["192.168.1.10", "192.168.1.11"],
+    "vars": {
+      "ansible_user": "ubuntu",
+      "ansible_ssh_private_key_file": "~/.ssh/id_rsa"
+    }
+  },
+  "db": {
+    "hosts": ["192.168.1.10"]
+  },
+  "web": {
+    "hosts": ["192.168.1.11"]
+  }
+}
+
+
+----
+
+
+#!/usr/bin/env python3
+import json
+
+def get_inventory():
+    inventory = {
+        "all": {
+            "hosts": ["192.168.1.10", "192.168.1.11"],
+            "vars": {
+                "ansible_user": "ubuntu",
+                "ansible_ssh_private_key_file": "~/.ssh/id_rsa"
+            }
+        },
+        "db": {"hosts": ["192.168.1.10"]},
+        "web": {"hosts": ["192.168.1.11"]}
+    }
+    return inventory
+
+if __name__ == "__main__":
+    print(json.dumps(get_inventory()))
+
+
+
+-----
+
+
+
+plugin: community.general.csv
+path: ./servers.csv
+key: hostname
+columns:
+  hostname: 0
+  ip: 1
+  group: 2
+
+groups:
+  web: group == "web"
+  db: group == "db"
+
+compose:
+  ansible_host: ip
+  ansible_user: ubuntu
+
+
+-----
+
+web01,192.168.1.11,web
+db01,192.168.1.10,db
+
+---
+
+sqlite3 servers.db "CREATE TABLE servers (hostname TEXT, ip TEXT, group_name TEXT);"
+sqlite3 servers.db "INSERT INTO servers VALUES ('web01','192.168.1.11','web');"
+sqlite3 servers.db "INSERT INTO servers VALUES ('db01','192.168.1.10','db');"
+
+------
+
+#!/usr/bin/env python3
+import sqlite3
+import json
+
+def get_inventory():
+    conn = sqlite3.connect("servers.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT hostname, ip, group_name FROM servers")
+    rows = cursor.fetchall()
+
+    inventory = {"_meta": {"hostvars": {}}}
+    for hostname, ip, group in rows:
+        if group not in inventory:
+            inventory[group] = {"hosts": []}
+        inventory[group]["hosts"].append(hostname)
+
+        inventory["_meta"]["hostvars"][hostname] = {
+            "ansible_host": ip,
+            "ansible_user": "ubuntu",
+            "ansible_ssh_private_key_file": "~/.ssh/id_rsa"
+        }
+    return inventory
+
+if __name__ == "__main__":
+    print(json.dumps(get_inventory(), indent=2))
+
+
+
+----
+
+hostname,ip,group
+web01,192.168.1.11,web
+db01,192.168.1.10,db
+
+-------
+
+
+#!/usr/bin/env python3
+import csv, json
+
+def get_inventory():
+    inventory = {"_meta": {"hostvars": {}}}
+
+    with open("servers.csv") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            group = row["group"]
+            hostname = row["hostname"]
+            ip = row["ip"]
+
+            if group not in inventory:
+                inventory[group] = {"hosts": []}
+            inventory[group]["hosts"].append(hostname)
+
+            inventory["_meta"]["hostvars"][hostname] = {
+                "ansible_host": ip,
+                "ansible_user": "ubuntu"
+            }
+    return inventory
+
+if __name__ == "__main__":
+    print(json.dumps(get_inventory(), indent=2))
+
+
+---
+
+import requests, json
+
+def get_inventory():
+    response = requests.get("http://cmdb.local/api/servers")
+    data = response.json()
+    inventory = {"_meta": {"hostvars": {}}}
+
+    for server in data:
+        group = server["group"]
+        hostname = server["hostname"]
+        ip = server["ip"]
+
+        inventory.setdefault(group, {"hosts": []})["hosts"].append(hostname)
+        inventory["_meta"]["hostvars"][hostname] = {"ansible_host": ip}
+    return inventory
