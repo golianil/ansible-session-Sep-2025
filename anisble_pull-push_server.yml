@@ -1,0 +1,44 @@
+---
+- name: Install Python on EC2 via Pull
+  hosts: localhost
+  connection: local
+  become: yes
+  tasks:
+    - name: Update apt cache (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python3 (Debian/Ubuntu)
+      apt:
+        name: python3
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install pip3 (Debian/Ubuntu)
+      apt:
+        name: python3-pip
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python3 (RedHat/Amazon Linux)
+      yum:
+        name: python3
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install pip3 (RedHat/Amazon Linux)
+      yum:
+        name: python3-pip
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Verify Python version
+      command: python3 --version
+      register: python_version
+
+    - debug:
+        msg: "Installed Python version is {{ python_version.stdout }}"
+
+
+
