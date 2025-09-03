@@ -1,0 +1,21 @@
+---
+- name: Ensure Ansible and git are installed on Ec2 Host
+  hosts: dev
+  become: yes
+  tasks:
+    - name: update apt cache
+      apt:
+        update_cache: yes
+
+    - name: install Ansible and git
+      apt:
+        name:
+          - ansible
+          - git
+        state: present
+      
+    - name: Trigger the pull command
+      command: ansible-pull -U https://github.com/SkillsMetrix/ansible-pullpush.git -C main playbook.yaml
+      args:
+        chdir: /tmp
+        
