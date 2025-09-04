@@ -1,0 +1,29 @@
+
+- name: Add reports to global list
+  set_fact:
+    all_reports: "{{ all_reports | default([]) + [host_report] }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Generate final report from template
+  template:
+    src: report.j2
+    dest: /tmp/host_report.txt
+  vars:
+    hosts: "{{ all_reports }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Send email with report
+  mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_user }}"
+    password: "{{ smtp_pass }}"
+    to: "{{ email_to }}"
+    from: "{{ email_from }}"
+    subject: "Ansible Host Status Report"
+    body: "{{ lookup('file', '/tmp/host_report.txt') }}"
+    secure: starttls
+  delegate_to: localhost
+  run_once: true

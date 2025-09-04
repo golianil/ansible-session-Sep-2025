@@ -1,0 +1,10 @@
+Server Health Report
+=====================
+
+{% for host in hosts %}
+Host: {{ host.hostname }} ({{ host.ip}})
+CPU Usage: {{ host.cpu_usage }} %
+Memory Usage: {{host.memory_usage}} %
+Disk Usage: {{host.disk_usage}} %
+--------------------------------------------------
+{% endfor %}

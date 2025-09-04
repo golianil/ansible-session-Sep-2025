@@ -1,0 +1,6 @@
+- name: Ensure psutil installed (Debian/Ubuntu)
+  become: true
+  apt:
+    name: python3-psutil
+    state: present
+    update_cache: yes

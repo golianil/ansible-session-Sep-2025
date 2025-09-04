@@ -1,0 +1,123 @@
+---
+- name: Install and run FastAPI health service with async tasks + handlers
+  hosts: web
+  become: yes
+  strategy: free        # hosts don't have to wait for each other
+  vars:
+    app_dir: /opt/fastapi-health
+    service_name: fastapi-health
+    pkg_async_timeout: 900  # seconds to allow apt to finish
+    wait_poll_interval: 5   # seconds between status polls
+
+  tasks:
+    - name: Kick off install of Python3 and pip (async)
+      ansible.builtin.apt:
+        name: python3-pip
+        state: present
+        update_cache: yes
+      async: "{{ pkg_async_timeout }}"
+      poll: 0
+      register: pip_job
+
+    - name: Kick off install of FastAPI, Uvicorn, psutil (async)
+      ansible.builtin.apt:
+        name:
+          - python3-fastapi
+          - python3-uvicorn
+          - python3-psutil
+        state: present
+        update_cache: yes
+      async: "{{ pkg_async_timeout }}"
+      poll: 0
+      register: fastapi_job
+
+    # Aggregate async jobs so we can wait on them in one loop
+    - name: Collect async job handles
+      set_fact:
+        async_jobs: "{{ [pip_job, fastapi_job] }}"
+
+    - name: Wait for package installs to finish
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: pkg_wait
+      until: pkg_wait.finished
+      retries: "{{ (pkg_async_timeout // wait_poll_interval) | int }}"
+      delay: "{{ wait_poll_interval }}"
+      loop: "{{ async_jobs }}"
+
+    - name: Create FastAPI app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Deploy FastAPI health app (same code, can be async but usually fast)
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/app.py"
+        mode: "0644"
+        content: |
+          from fastapi import FastAPI
+          import psutil, socket
+
+          app = FastAPI()
+
+          @app.get("/health")
+          def health():
+              try:
+                  ip = socket.gethostbyname(socket.gethostname())
+              except Exception:
+                  ip = "N/A"
+              return {
+                  "hostname": socket.gethostname(),
+                  "ip": ip,
+                  "cpu_usage": psutil.cpu_percent(interval=1),
+                  "memory_usage": psutil.virtual_memory().percent,
+                  "disk_usage": psutil.disk_usage('/').percent
+              }
+      notify: Restart fastapi-health
+
+    - name: Create systemd service for FastAPI
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/{{ service_name }}.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=FastAPI Health Service
+          After=network.target
+
+          [Service]
+          ExecStart=/usr/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir {{ app_dir }}
+          Restart=always
+          RestartSec=3
+          WorkingDirectory={{ app_dir }}
+          KillMode=mixed
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd daemon
+        - Restart fastapi-health
+
+    - name: Ensure service is enabled and started (sync)
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        enabled: true
+        state: started
+
+    # Optional: verify the API is answering after any restart
+    - name: Wait for port 8000 to be open
+      ansible.builtin.wait_for:
+        port: 8000
+        host: 127.0.0.1
+        delay: 1
+        timeout: 60
+
+  handlers:
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart fastapi-health
+      ansible.builtin.systemd:
+        name: "{{ service_name }}"
+        state: restarted
